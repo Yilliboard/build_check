@@ -1,0 +1,47 @@
+import pandas as pd
+import joblib
+from google.cloud import aiplatform, storage
+
+# 1. Initialize & Get Model Path
+PROJECT_ID = "your-project-id"
+REGION = "us-central1"
+MODEL_ID = "your-model-id"
+
+aiplatform.init(project=PROJECT_ID, location=REGION)
+model = aiplatform.Model(model_name=MODEL_ID)
+
+# The 'uri' attribute contains the GCS folder where model.joblib is stored
+gcs_model_dir = model.uri 
+print(f"Model artifacts located at: {gcs_model_dir}")
+
+# 2. Download the artifact (model.joblib)
+def download_model(gcs_uri, local_path="model.joblib"):
+    # Strip 'gs://' and split bucket from path
+    path_parts = gcs_uri.replace("gs://", "").split("/")
+    bucket_name = path_parts[0]
+    # Vertex AI model.uri usually points to a folder; append 'model.joblib'
+    blob_path = "/".join(path_parts[1:]) + "/model.joblib"
+    
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    
+    blob.download_to_filename(local_path)
+    print(f"Downloaded model to {local_path}")
+
+download_model(gcs_model_dir)
+
+# 3. Load Model and Predict with Pandas
+# Load the downloaded model
+loaded_model = joblib.load("model.joblib")
+
+# Prepare your data
+data = {
+    "feature_1": [1.0, 2.5],
+    "feature_2": [0.5, 3.1]
+}
+df = pd.DataFrame(data)
+
+# Perform Prediction
+predictions = loaded_model.predict(df)
+print("Predictions:", predictions)
