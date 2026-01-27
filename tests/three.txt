@@ -1,42 +1,63 @@
 from pathlib import Path
+import re
 
+input_path = Path("config.yaml")
+output_path = Path("config.py")
 
-def extract_queries_block(text):
-    lines = text.splitlines()
-    result = []
-    inside = False
-    base_indent = None
+lines = input_path.read_text().splitlines()
 
-    for line in lines:
-        if line.strip().startswith("queries:"):
-            inside = True
-            base_indent = len(line) - len(line.lstrip())
-            result.append(line)
-            continue
+out = []
+indent_stack = []
+in_sql = False
+sql_lines = []
+current_indent = ""
 
-        if inside:
-            indent = len(line) - len(line.lstrip())
-            if line.strip() and indent <= base_indent:
-                break  # exited queries block
-            result.append(line)
+for line in lines:
+    stripped = line.strip()
 
-    return "\n".join(result)
+    # Top-level key (datapre:)
+    if stripped.endswith(":") and not indent_stack:
+        key = stripped[:-1]
+        out.append(f'{key} = {{')
+        indent_stack.append("root")
+        continue
 
+    # Nested mapping key (queries:)
+    if stripped.endswith(":") and not in_sql:
+        indent = " " * (len(line) - len(line.lstrip()))
+        key = stripped[:-1]
+        out.append(f'{indent}"{key}": {{')
+        indent_stack.append("map")
+        continue
 
-# Read input as raw text
-input_text = Path("config.yaml").read_text()
+    # Query start: queryX: f'''
+    m = re.match(r"(\s*)(\w+):\s*f'''(.*)", line)
+    if m:
+        current_indent, key, rest = m.groups()
+        out.append(f'{current_indent}"{key}": """')
+        in_sql = True
+        sql_lines = []
+        if rest.strip():
+            sql_lines.append(rest)
+        continue
 
-queries_block = extract_queries_block(input_text)
+    # Inside SQL block
+    if in_sql:
+        if stripped.endswith("'''"):
+            content = stripped[:-3]
+            if content:
+                sql_lines.append(content)
+            for s in sql_lines:
+                out.append(f"{current_indent}{s.rstrip()}")
+            out.append(f'{current_indent}""",')
+            in_sql = False
+        else:
+            sql_lines.append(line.lstrip())
+        continue
 
-# Write to Python file
-output = f"""# Auto-generated Python config
-# Preserves SQL indentation exactly
+# Close opened dictionaries
+out.append("   }")
+out.append("}")
 
-CONFIG = {{
-{queries_block}
-}}
-"""
-
-Path("config.py").write_text(output)
-
-print("config.py written successfully")
+output_path.write_text("\n".join(out))
+print("config.py generated successfully")
